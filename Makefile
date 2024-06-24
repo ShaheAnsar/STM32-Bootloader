@@ -2,10 +2,11 @@ TARGET=AD9833
 
 CC=arm-none-eabi-gcc
 OBJCOPY=arm-none-eabi-objcopy
-SRC=$(shell fd "\\.c$$")
+#SRC=$(shell fd "\\.c$$")
+SRC?=main.c
 ASRC=$(shell fd "\\.s$$")
 OBJ=$(foreach i,$(SRC),$(i:%.c=%.o)) $(foreach i,$(ASRC),$(i:%.s=%_s.o))
-CFLAGS=-Wall -Wextra -pedantic -std=c11 -Os -nostdlib -mcpu=cortex-m3 -pipe -T linker.ld
+CFLAGS=-Wall -Wextra -pedantic -std=c11 -Os -nostdlib -mcpu=cortex-m3 -pipe -T linker.ld -fno-strict-aliasing
 LDFLAGS=
 
 
