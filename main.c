@@ -387,7 +387,7 @@ int main(void) {
 	}
 	int r = wait_for_magic(3000);
 	if(r == 1) {
-		debug_log("Got magic!");
+		debug_log("Got magic! YAY");
 		on_board_blink(100);
 	} else {
 		debug_log("Timed out...");
