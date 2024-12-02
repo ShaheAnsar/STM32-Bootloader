@@ -383,8 +383,40 @@ int main(void) {
 	system_init(); // Initialize clocks, flash etc
 	init_uart();
 	while(1) {
-		print_uart("Hello\n");
-	}
+		int program_flash = 0;
+		int read_flash = 0;
+		while(1) {
+			char a = receive_byte_uart();
+			print_uart("Received byte: ");
+			send_uart(a);
+			print_uart("\r\n");
+			if(a == 'p'){
+				program_flash = 1;
+				break;
+			} else if(a == 'r'){
+				read_flash = 1;
+				break;
+			}
+		}
+		print_uart("Hello\r\n");
+		if(program_flash){
+			print_uart("Unlocking fpec...\r\n");
+			unlock_fpec();
+			print_uart("Unlocked fpec!\r\n");
+			print_uart("Erasing region...\r\n");
+			uint16_t* flash_addr = (uint16_t*)0x08007C00; //31st page in flash
+			erase_region((char*)flash_addr, 1);	
+			print_uart("Writing Hello World to the flash....\r\n");
+			char msg[40] = "Hello World!";
+			write_flash(flash_addr, (uint16_t*)msg, 7); //13 bytes total, so we write 14 bytes (7 half words)
+			print_uart("Hello world written!\r\n");
+		}
+		if(read_flash){
+			print_uart("Reading from 0x08007C00 in flash...\r\n");
+			print_uart((char*)0x08007C00);
+			print_uart("Successful?\r\n");
+		}
+	} 
 	int r = wait_for_magic(3000);
 	if(r == 1) {
 		debug_log("Got magic! YAY");
