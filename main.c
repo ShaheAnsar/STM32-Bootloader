@@ -77,9 +77,6 @@ void heartbeat() {
   // Set PA8 to an AFIO Push Pull Output
   GPIOA_CRH |= 0b11 | (0b10 << 2);
   GPIOA_CRH &= ~(1 << 2);
-  // Set PA8 to an AFIO Push Pull Output
-  GPIOA_CRH |= 0b11 | (0b10 << 2);
-  GPIOA_CRH &= ~(1 << 2);
   // Output PLLCLK/2 on PA8
   RCC_CFGR |= 0b111 << 24;
 }
@@ -385,10 +382,15 @@ void boot() {
 int main(void) {
 	system_init(); // Initialize clocks, flash etc
 	init_uart();
+	while(1) {
+		print_uart("Hello\n");
+	}
 	int r = wait_for_magic(3000);
 	if(r == 1) {
+		debug_log("Got magic!");
 		on_board_blink(100);
 	} else {
+		debug_log("Timed out...");
 		on_board_blink(2000);
 	}
 	return 0;
