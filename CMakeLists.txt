@@ -10,4 +10,10 @@ set(outfile_prefix bootloader)
 add_executable(${outfile_prefix}_exe ${SOURCES})
 add_custom_command(TARGET ${outfile_prefix}_exe POST_BUILD
 				   COMMAND arm-none-eabi-objcopy -Obinary ${outfile_prefix}_exe ${outfile_prefix}.bin
-			   	   COMMENT "Converting to flashable files...")
+			   	   COMMENT "Converting to binary")
+add_custom_command(TARGET ${outfile_prefix}_exe POST_BUILD
+				   COMMAND arm-none-eabi-objcopy -Oihex ${outfile_prefix}_exe ${outfile_prefix}.ihex
+			   	   COMMENT "Converting to ihex")
+add_custom_command(TARGET ${outfile_prefix}_exe POST_BUILD
+				   COMMAND arm-none-eabi-size -Ax ${outfile_prefix}_exe 
+			   	   COMMENT "Printing size...")

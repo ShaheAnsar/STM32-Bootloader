@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
 
 #define FCLK 72000000UL
 
@@ -190,13 +191,14 @@ void print_uart(char* msg) {
 void read_uart(char* buf, unsigned int len) {
   for(uint32_t i = 0; i < len - 1; i++) {
     buf[i] = receive_byte_uart();
-    if(buf[i] == '\r'){
+    if(( buf[i] == '\r' ) || (buf[i] == '\n')){
       buf[i + 1] = 0;
       return;
     }
   }
   buf[len - 1] = 0;
 }
+
 
 
 void debug_log(char* msg) {
@@ -222,14 +224,21 @@ int wait_for_magic(int timeout_ms) {
     // Start timer
     STK_CTRL = 0;
     STK_CTRL |= 1;
+	char in_buf[6];
     // Check whether the counter has counted down to 0
 	// If the byte received is the magic bye, stop the timer and return 1
     while (!(STK_CTRL & (1 << 16))){
-		if((USART1_SR & (1 << 5))){
-			if(USART1_DR == BOOTLOADER_MAGIC_START){
-				STK_CTRL &= ~(1);
-				return 1;
-			}
+		//if((USART1_SR & (1 << 5))){
+		//	if(USART1_DR == BOOTLOADER_MAGIC_START){
+		//		STK_CTRL &= ~(1);
+		//		return 1;
+		//	}
+		//}
+		read_uart(in_buf, 6);
+		if(strncmp(in_buf, "start", 5) == 0) {
+			//stop timer
+			STK_CTRL &= ~(1);
+			return 1;
 		}
 	}
       
@@ -239,6 +248,8 @@ int wait_for_magic(int timeout_ms) {
   // If the byte was not received within the given time, return 0
   return 0;
 }
+
+// Struct used to store the state of an ihex decoding
 
 
 void write_program() {
@@ -268,6 +279,153 @@ void write_flash(uint16_t* base_ptr, uint16_t* buf, int nhwords) {
 	while(FLASH_SR & 1); // Wait till busy flag is clear
 	FLASH_CR &= ~(1); // Clear the programming bit
 	
+}
+
+
+
+typedef struct ihex_info_t{
+
+}ihex_info_it;
+
+int convert_char_to_num(char c){
+	switch(c){
+		case '0':
+		case '1':
+		case '2':
+		case '3':
+		case '4':
+		case '5':
+		case '6':
+		case '7':
+		case '8':
+		case '9':
+			return c - '0';
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+			return 10 + 'A' - c;
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+			return 10 + 'a' - c;
+		default:
+			kill("Invalid num conversion");
+			return -1;
+
+	}
+}
+
+int pow16(int n) {
+	int ret = 1;
+	for(int i = 0; i < n; i++) {
+		ret *= 0x10;
+	}
+	return ret;
+}
+
+int atoi(char* buf, int len){ // Works only for hex
+	int num = 0;
+	for(int i = 0; i < len; i++) {
+		num += pow16(len - 1 - i)*convert_char_to_num(buf[i]);
+	}
+	return num;
+}
+
+int hex__get_byte_count() {
+	char buf[2]; // Buffer to hold incoming messages
+	int byte_count = 0;
+	// Get the byte count
+	for(int i = 0; i < 2; i++) {
+		buf[i] = receive_byte_uart();
+	}
+	byte_count = 0x10*convert_char_to_num(buf[0]) + convert_char_to_num(buf[1]);
+	return byte_count;
+}
+
+int hex__get_address() {
+	char buf[4];
+	int addr;
+	for(int i = 0; i < 4; i++) {
+		buf[i] = receive_byte_uart();
+	}
+	return atoi(buf, 4);
+}
+
+typedef enum IntelHexRecordType{
+	IHexRTypeData, //Supported
+	IHexRTypeEOF, // Supported
+	IHexRTypeESA, //Extended Segment Address - Unhandled
+	IHexRTypeSSA, //Start segment address - Unhandled
+	IHexRTypeELA, //Extended Linear Address - Supported
+	IHexRTypeSLA, //Start Linear Address - the MCU starts here - Supported
+} IntelHexRecordType;
+
+IntelHexRecordType hex__get_record_type() {
+	char buf[2];
+	for(int i = 0; i < 2; i++) {
+		buf[i] = receive_byte_uart();
+	}
+	int rtype = atoi(buf, 2);
+	return rtype;
+}
+
+void hex__get_data(char* buf, int len) {
+	char byte[2];
+	for(int i = 0; i < len; i++) {
+		byte[0] = receive_byte_uart();
+		byte[1] = receive_byte_uart();
+		buf[i] = atoi(byte, 2);
+	}
+}
+
+int hex__get_checksum() {
+	char buf[2];
+	for(int i = 0; i < 2; i++) {
+		buf[i] = receive_byte_uart();
+	}
+	return atoi(buf, 2);
+}
+
+void hex_decode() {
+	while(1) {
+		char c = 0;
+		c = receive_byte_uart();
+		char buf[100];
+		read_uart(buf, 100);
+		print_uart("Received: ");
+		print_uart(buf);
+		print_uart("\r\n");
+		if(c == ':'){ //Is a valid ihex record
+			print_uart("Detected start of record!");
+			int byte_count = hex__get_byte_count();
+			uint32_t addr = 0;
+			addr = hex__get_address();
+			IntelHexRecordType rtype = hex__get_record_type();
+			char databuf[100];
+			char msg[100];
+			hex__get_data(databuf, byte_count);
+			char checksum = hex__get_checksum();
+			print_uart("Record received!: bc: ");
+			itoa(byte_count, msg, 100);
+			print_uart(msg);
+			print_uart(", addr: ");
+			itoa(addr, msg, 100);
+			print_uart(msg);
+			print_uart(", rtype: ");
+			itoa(rtype, msg, 100);
+			print_uart(msg);
+			print_uart(", cs: ");
+			itoa(checksum, msg, 100);
+			print_uart(msg);
+			print_uart("\r\n");
+		}
+	}
 }
 
 void transfer_to_backup() {
@@ -382,43 +540,44 @@ void boot() {
 int main(void) {
 	system_init(); // Initialize clocks, flash etc
 	init_uart();
-	while(1) {
-		int program_flash = 0;
-		int read_flash = 0;
-		while(1) {
-			char a = receive_byte_uart();
-			print_uart("Received byte: ");
-			send_uart(a);
-			print_uart("\r\n");
-			if(a == 'p'){
-				program_flash = 1;
-				break;
-			} else if(a == 'r'){
-				read_flash = 1;
-				break;
-			}
-		}
-		print_uart("Hello\r\n");
-		if(program_flash){
-			print_uart("Unlocking fpec...\r\n");
-			unlock_fpec();
-			print_uart("Unlocked fpec!\r\n");
-			print_uart("Erasing region...\r\n");
-			uint16_t* flash_addr = (uint16_t*)0x08007C00; //31st page in flash
-			erase_region((char*)flash_addr, 1);	
-			print_uart("Writing Hello World to the flash....\r\n");
-			char msg[40] = "Hello World!";
-			write_flash(flash_addr, (uint16_t*)msg, 7); //13 bytes total, so we write 14 bytes (7 half words)
-			print_uart("Hello world written!\r\n");
-		}
-		if(read_flash){
-			print_uart("Reading from 0x08007C00 in flash...\r\n");
-			print_uart((char*)0x08007C00);
-			print_uart("Successful?\r\n");
-		}
-	} 
-	int r = wait_for_magic(3000);
-	if(r == 1) {
+	//while(1) {
+	//	int program_flash = 0;
+	//	int read_flash = 0;
+	//	while(1) {
+	//		char a = receive_byte_uart();
+	//		print_uart("Received byte: ");
+	//		send_uart(a);
+	//		print_uart("\r\n");
+	//		if(a == 'p'){
+	//			program_flash = 1;
+	//			break;
+	//		} else if(a == 'r'){
+	//			read_flash = 1;
+	//			break;
+	//		}
+	//	}
+	//	print_uart("Hello\r\n");
+	//	if(program_flash){
+	//		print_uart("Unlocking fpec...\r\n");
+	//		unlock_fpec();
+	//		print_uart("Unlocked fpec!\r\n");
+	//		print_uart("Erasing region...\r\n");
+	//		uint16_t* flash_addr = (uint16_t*)0x08007C00; //31st page in flash
+	//		erase_region((char*)flash_addr, 1);	
+	//		print_uart("Writing Hello World to the flash....\r\n");
+	//		char msg[40] = "Hello World!";
+	//		write_flash(flash_addr, (uint16_t*)msg, 7); //13 bytes total, so we write 14 bytes (7 half words)
+	//		print_uart("Hello world written!\r\n");
+	//	}
+	//	if(read_flash){
+	//		print_uart("Reading from 0x08007C00 in flash...\r\n");
+	//		print_uart((char*)0x08007C00);
+	//		print_uart("Successful?\r\n");
+	//	}
+	//} 
+	//int r = wait_for_magic(3000);
+	hex_decode();
+	if(1) {
 		debug_log("Got magic! YAY");
 		on_board_blink(100);
 	} else {
