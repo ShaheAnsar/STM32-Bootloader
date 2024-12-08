@@ -5,7 +5,7 @@ message(STATUS "Linker search path: ${PROJECT_SOURCE_DIR}")
 set(CMAKE_C_FLAGS "-std=c11 -Wall -Wextra -pedantic -Os -nostdlib -mcpu=cortex-m3 -pipe -T ${LINKER_FILE} -fno-strict-aliasing")
 set(CMAKE_LD_FLAGS "-std=c11 -Wall -Wextra -pedantic -Os -nostdlib -mcpu=cortex-m3 -pipe -T ${LINKER_FILE} -fno-strict-aliasing")
 set(CMAKE_AS_FLAGS "-std=c11 -Wall -Wextra -pedantic -Os -nostdlib -mcpu=cortex-m3 -pipe -T ${LINKER_FILE} -fno-strict-aliasing")
-set(SOURCES main.c boot.s)
+set(SOURCES main.c boot.s utils.c)
 set(outfile_prefix bootloader)
 add_executable(${outfile_prefix}_exe ${SOURCES})
 add_custom_command(TARGET ${outfile_prefix}_exe POST_BUILD

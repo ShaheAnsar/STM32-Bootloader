@@ -3,216 +3,11 @@
 #include <string.h>
 
 #define FCLK 72000000UL
-
-#include "stm32f103.h"
-
 #define LOG 1
 
-// Redundant bootloader
-#define BOOTLOADER_BASE 0x8000000
-#define BOOTLOADER_LENGTH 0x2000
-#define BOOTLOADER_STORAGE_OFFSET 0x100
-#define BOOTLOADER_STORAGE ((uint16_t*)(BOOTLOADER_BASE + BOOTLOADER_LENGTH - BOOTLOADER_STORAGE_OFFSET)) //Pointer to a 256 byte area used for perma storage
-#define APPLICATION_BASE (BOOTLOADER_BASE + BOOTLOADER_LENGTH)
-#define APPLICATION_PTR ((uint16_t*)APPLICATION_BASE)
-#define APPLICATION_MAX_LENGTH 0x7000
-#define BACKUP_BASE (APPLICATION_BASE + APPLICATION_MAX_LENGTH)
-#define BACKUP_PTR ((uint16_t*)BACKUP_BASE)
-#define BACKUP_MAX_LENGTH 0x7000
-#define APPLICATION_PAGES 28
-#define BACKUP_PAGES 28
+#include "stm32f103.h"
+#include "utils.h"
 
-// Bootloader perma storage indices
-#define APPLICATION_VALID_INDEX 0 // The value at this index is 0 if the application is invalid.
-#define BACKUP_VALID_INDEX 1 // The value at this index is 0 if the backup is invalid.
-#define APPLICATION_CRC_INDEX 2
-#define BACKUP_CRC_INDEX 3
-#define APPLICATION_DATA_LENGTH_INDEX 4
-#define BACKUP_DATA_LENGTH_INDEX 5
-
-// Pre-defined Constants (Do NOT change)
-#define FPEC_KEY1 0x45670123
-#define FPEC_KEY2 0xCDEF89AB
-#define BYTES_PER_PAGE 1024
-
-// Implementation constants
-#define BOOTLOADER_MAGIC_START 0x27 // Wait till we receive this to start programming
-#define BOOTLOADER_MAGIC_RESET 0x17 // Used to invalidate both the application and backup
-#define BOOTLOADER_METADATA_PACKET_HEADER 0x12 // Used to signal the start of the metadata packet. The header is followed by a 2 byte size.
-#define BOOTLOADER_COMMAND_PAUSE "CMD:PAUSE" // Wait 100ms to flush the flash. Sent by the MCU to the program on the PC.
-#define TRANSFER_PAGES 1 // These many pages are read and then written to flash
-
-
-void itoa(int a, char* buf, int n) {
-	if(a == 0) {
-		if(n >= 2){
-			buf[0] = '0';
-			buf[1] = 0; 
-		}
-		return;
-	}
-	int i = 0;
-	for(; i < n - 1; i++) {
-		if(a == 0)
-			break;
-		buf[n - 1 - i] = '0' + (a % 10);
-		a = a/10;
-	}
-	buf[i] = 0;
-}
-
-
-void fucked() {
-  RCC_APB2ENR |= 1 << 4;
-  // Set PC13 as an output
-  GPIOC_CRH |= 0b11 << 20;
-  GPIOC_CRH &= ~(0b11 << 22);
-  while(1) {
-    GPIOC_BSRR |= 1 << 13;
-    GPIOC_BSRR |= 1 << 29;
-  }
-}
-
-void heartbeat() {
-  RCC_APB2ENR |= (1 << 2);
-  // Set PA8 to an AFIO Push Pull Output
-  GPIOA_CRH |= 0b11 | (0b10 << 2);
-  GPIOA_CRH &= ~(1 << 2);
-  // Output PLLCLK/2 on PA8
-  RCC_CFGR |= 0b111 << 24;
-}
-
-
-void systick_init() {
-  STK_LOAD = 9000;
-}
-
-void delay_ms(unsigned int ms) {
-  for (; ms >= 1; ms--) {
-    // Start timer
-    STK_CTRL = 0;
-    STK_CTRL |= 1;
-    // Check whether the counter has counted down to 0
-    while (!(STK_CTRL & (1 << 16)));
-      
-    // Stop timer
-    STK_CTRL &= ~(1);
-  }
-}
-
-void on_board_blink(int delay){
-	// Enable clock to Port C
-	RCC_APB2ENR |= (1 << 4);
-	// Setup TIM2 for interrupt generation. Period is 500ms.
-	// Reset the GPIOC config register for the pins connected to the LED
-	GPIOC_CRH &= ~((0b11 << 20) | (0b11 << 22));
-	// Set the PC13 as an output
-	GPIOC_CRH |= (0b10 << 20);
-	while(1) {
-		GPIOC_BSRR |= (1 << 13);
-		delay_ms(delay);
-		GPIOC_BSRR |= (1 << 29);
-		delay_ms(delay);
-	}
-}
-
-
-void system_init() {
-  // Turn on the external crystal clock
-  RCC_CR |= 1 << 16;
-  // Wait till the oscillator is stable
-  while(!(RCC_CR & (1 << 17)));
-  // Set a PLL MUL factor of 9 (9 * 8MHz = 72MHz)
-  RCC_CFGR |= 0b111 << 18;
-  // Set XO as the source for the PLL
-  RCC_CFGR |= 1 << 16;
-  // Set PCLK1 to 36Mhz
-  RCC_CFGR |= 0b100 << 8;
-  // Turn the PLL on
-  RCC_CR |= 1 << 24;
-  // Wait till PLL is stable
-  while(!(RCC_CR & (1 << 25)));
-  // Turn on heartbeat
-  heartbeat();
-  // Set flash latency to two wait states.
-  FLASH_ACR |= 0b10;
-  // Switch to the PLL as the main clock
-  RCC_CFGR |= 0b10;
-  systick_init();
-}
-
-void init_uart() {
-  //Setup the GPIO to the appropriate AFIO
-  // Enable AFIO clocks
-  RCC_APB2ENR |= 1;
-  // Clock PortA
-  RCC_APB2ENR |= 1 << 2;
-  // Reset the GPIO states to 0 for PA9 and PA10
-  GPIOA_CRH &= ~(0xff << 4);
-  //Set PA9 as an AFIO Output
-  GPIOA_CRH |= (0b11 << 4) | (0b10 << 6);
-  //Set PA10 as an input
-  GPIOA_CRH |= (0b01 << 10);
-
-  // Enable the uart clock
-  RCC_APB2ENR |= 1 << 14;
-  // Set the baud rate. The default is 9600
-  USART1_BRR = BAUDRATE_FRACTION(9600) | (BAUDRATE_MANTISSA(9600) << 4);
-
-  // Enable the UART
-  USART1_CR1 = 1 << 13;
-
-  // Reset the control resistors to a known state
-  USART1_CR2 = 0;
-  USART1_CR3 = 0; 
-  // Enable the transmitter and receiver
-  USART1_CR1 |= 0b11 << 2;
-}
-
-void send_uart(char a) {
-  // Wait till data is flushed from the output buffer
-  while(!( USART1_SR & (1 << 7 )));
-  USART1_DR = a;
-}
-
-
-char receive_byte_uart() {
-  // Wait till data is in the input buffer
-  while(!(USART1_SR & (1 << 5)));
-  return USART1_DR;
-}
-
-void print_uart(char* msg) {
-  for(uint32_t i = 0; msg[i] != 0; i++) {
-    send_uart(msg[i]);
-  }
-}
-
-void read_uart(char* buf, unsigned int len) {
-  for(uint32_t i = 0; i < len - 1; i++) {
-    buf[i] = receive_byte_uart();
-    if(( buf[i] == '\r' ) || (buf[i] == '\n')){
-      buf[i + 1] = 0;
-      return;
-    }
-  }
-  buf[len - 1] = 0;
-}
-
-
-
-void debug_log(char* msg) {
-#if LOG==1
-	print_uart(msg);
-#endif
-}
-
-void kill(char* msg) {
-#if LOG==1
-	print_uart(msg);
-	fucked();
-#endif
-}
 
 void unlock_fpec() {
 	FLASH_KEYR = FPEC_KEY1;
@@ -283,9 +78,6 @@ void write_flash(uint16_t* base_ptr, uint16_t* buf, int nhwords) {
 
 
 
-typedef struct ihex_info_t{
-
-}ihex_info_it;
 
 int convert_char_to_num(char c){
 	switch(c){
@@ -350,7 +142,6 @@ int hex__get_byte_count() {
 
 int hex__get_address() {
 	char buf[4];
-	int addr;
 	for(int i = 0; i < 4; i++) {
 		buf[i] = receive_byte_uart();
 	}
@@ -365,6 +156,14 @@ typedef enum IntelHexRecordType{
 	IHexRTypeELA, //Extended Linear Address - Supported
 	IHexRTypeSLA, //Start Linear Address - the MCU starts here - Supported
 } IntelHexRecordType;
+
+typedef struct ihex_info_t{
+	size_t size; // Byte count
+	IntelHexRecordType rtype;
+	char* databuffer; // Holds all the data
+	size_t buffer_size;
+	uint32_t address; // Holds the address to which this data must be copied
+}ihex_info_it;
 
 IntelHexRecordType hex__get_record_type() {
 	char buf[2];
@@ -392,38 +191,24 @@ int hex__get_checksum() {
 	return atoi(buf, 2);
 }
 
-void hex_decode() {
+int hex_decode(ihex_info_it* info) { // Get a single ihex record
 	while(1) {
 		char c = 0;
 		c = receive_byte_uart();
-		char buf[100];
-		read_uart(buf, 100);
-		print_uart("Received: ");
-		print_uart(buf);
-		print_uart("\r\n");
 		if(c == ':'){ //Is a valid ihex record
-			print_uart("Detected start of record!");
 			int byte_count = hex__get_byte_count();
 			uint32_t addr = 0;
 			addr = hex__get_address();
 			IntelHexRecordType rtype = hex__get_record_type();
-			char databuf[100];
-			char msg[100];
+			char* databuf = info->databuffer;
+			if(info->buffer_size < byte_count) {
+				return -1;
+			}
 			hex__get_data(databuf, byte_count);
 			char checksum = hex__get_checksum();
-			print_uart("Record received!: bc: ");
-			itoa(byte_count, msg, 100);
-			print_uart(msg);
-			print_uart(", addr: ");
-			itoa(addr, msg, 100);
-			print_uart(msg);
-			print_uart(", rtype: ");
-			itoa(rtype, msg, 100);
-			print_uart(msg);
-			print_uart(", cs: ");
-			itoa(checksum, msg, 100);
-			print_uart(msg);
-			print_uart("\r\n");
+			info->address = addr;
+			info->size = byte_count;
+			return 0;
 		}
 	}
 }
@@ -537,53 +322,42 @@ void boot() {
 	}
 }
 
+#define IHEX_BUFSIZE 100
+
 int main(void) {
 	system_init(); // Initialize clocks, flash etc
 	init_uart();
-	//while(1) {
-	//	int program_flash = 0;
-	//	int read_flash = 0;
-	//	while(1) {
-	//		char a = receive_byte_uart();
-	//		print_uart("Received byte: ");
-	//		send_uart(a);
-	//		print_uart("\r\n");
-	//		if(a == 'p'){
-	//			program_flash = 1;
-	//			break;
-	//		} else if(a == 'r'){
-	//			read_flash = 1;
-	//			break;
-	//		}
-	//	}
-	//	print_uart("Hello\r\n");
-	//	if(program_flash){
-	//		print_uart("Unlocking fpec...\r\n");
-	//		unlock_fpec();
-	//		print_uart("Unlocked fpec!\r\n");
-	//		print_uart("Erasing region...\r\n");
-	//		uint16_t* flash_addr = (uint16_t*)0x08007C00; //31st page in flash
-	//		erase_region((char*)flash_addr, 1);	
-	//		print_uart("Writing Hello World to the flash....\r\n");
-	//		char msg[40] = "Hello World!";
-	//		write_flash(flash_addr, (uint16_t*)msg, 7); //13 bytes total, so we write 14 bytes (7 half words)
-	//		print_uart("Hello world written!\r\n");
-	//	}
-	//	if(read_flash){
-	//		print_uart("Reading from 0x08007C00 in flash...\r\n");
-	//		print_uart((char*)0x08007C00);
-	//		print_uart("Successful?\r\n");
-	//	}
-	//} 
-	//int r = wait_for_magic(3000);
-	hex_decode();
-	if(1) {
-		debug_log("Got magic! YAY");
-		on_board_blink(100);
-	} else {
-		debug_log("Timed out...");
-		on_board_blink(2000);
+	char ihex_buffer[IHEX_BUFSIZE];
+	ihex_info_it ihex_info;
+	ihex_info.databuffer = ihex_buffer;
+	ihex_info.buffer_size = IHEX_BUFSIZE;
+	int err = hex_decode(&ihex_info);
+	if(err != 0) {
+		kill("Error!!!");
+		while(1);
 	}
+	print_uart("Received hex record!\r\n");
+	print_uart("Address: ");
+	iprint_uart(ihex_info.address);
+	print_uart("\r\nByte Count: ");
+	iprint_uart(ihex_info.size);
+	print_uart("\r\nRecord Type: ");
+	iprint_uart(ihex_info.rtype);
+	print_uart("\r\nData:\r\n");
+	for(int i = 0; (i < ihex_info.size) && ( i < ihex_info.buffer_size ); i++) {
+		iprint_uart(i);
+		print_uart(": ");
+		iprint_uart(ihex_info.databuffer[i]);
+		print_uart("\r\n");
+	}
+
+	//if(1) {
+	//	debug_log("Got magic! YAY");
+	//	on_board_blink(100);
+	//} else {
+	//	debug_log("Timed out...");
+	//	on_board_blink(2000);
+	//}
 	return 0;
 }
 
