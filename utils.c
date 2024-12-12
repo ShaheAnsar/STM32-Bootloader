@@ -37,7 +37,9 @@ void fucked() {
   GPIOC_CRH &= ~(0b11 << 22);
   while(1) {
     GPIOC_BSRR |= 1 << 13;
+	delay_ms(200);
     GPIOC_BSRR |= 1 << 29;
+	delay_ms(200);
   }
 }
 

@@ -1,5 +1,5 @@
 import serial
-ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=1)
+ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=0.1)
 print(f"Using port: {ser.name}")
 ihex_data = []
 with open("bootloader.ihex", "r") as f:

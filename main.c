@@ -385,23 +385,49 @@ void boot() {
 	}
 }
 
-#define IHEX_BUFSIZE BYTES_PER_PAGE
-char temp_buffer[IHEX_BUFSIZE]; //Buffer to store info before flushing to flash
+
+#define IHEX_BUFSIZE BYTES_PER_PAGE //1024 bytes per page for this MCU
+typedef struct DataBuffer_t{
+	char buffer[IHEX_BUFSIZE];
+	size_t length; //Valid data stored so far
+	size_t get_i; //Index from which to get data
+} DataBuffer_t; // Buffer to store data into
+
+inline void DataBuffer_init(DataBuffer_t* buf){
+	buf->length = 0;
+	buf->get_i = 0;
+}
+
+inline char* DataBuffer_current_free_address(DataBuffer_t* buf){
+	return buf->buffer + buf->length;
+}
+
+size_t DataBuffer_free_space(DataBuffer_t* buf) {
+	if(buf->length > IHEX_BUFSIZE) {
+		kill("Buffer filled!");
+	}
+	return IHEX_BUFSIZE - buf->length;
+}
+
 int main(void) {
 	system_init(); // Initialize clocks, flash etc
 	init_uart();
 	ihex_info_it ihex_info;
 	init_ihex_info(&ihex_info);
+	DataBuffer_t buf;
+	DataBuffer_init(&buf);
 	while(1){
-		char ihex_buffer[IHEX_BUFSIZE];
-		ihex_info.databuffer = ihex_buffer;
-		ihex_info.buffer_size = IHEX_BUFSIZE;
+		ihex_info.databuffer = DataBuffer_current_free_address(&buf);
+		ihex_info.buffer_size = DataBuffer_free_space(&buf);
 		int err = hex_decode(&ihex_info);
 		if(err != 0) {
 			kill("Error!!!");
 			while(1);
 		}
+		buf.length += ihex_info.size; // Update length
 		print_uart("Received hex record!");
+		print_uart("\r\nBuffer Size: ");
+		iprint_uart(ihex_info.buffer_size);
 		print_uart("\r\nAddress: ");
 		iprint_uart(ihex_info.address);
 		print_uart("\r\nBase Address: ");
@@ -421,13 +447,6 @@ int main(void) {
 		}
 	}
 
-	//if(1) {
-	//	debug_log("Got magic! YAY");
-	//	on_board_blink(100);
-	//} else {
-	//	debug_log("Timed out...");
-	//	on_board_blink(2000);
-	//}
 	return 0;
 }
 
