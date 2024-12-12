@@ -98,14 +98,14 @@ int convert_char_to_num(char c){
 		case 'D':
 		case 'E':
 		case 'F':
-			return 10 + 'A' - c;
+			return 10 - 'A' + c;
 		case 'a':
 		case 'b':
 		case 'c':
 		case 'd':
 		case 'e':
 		case 'f':
-			return 10 + 'a' - c;
+			return 10 - 'a' + c;
 		default:
 			kill("Invalid num conversion");
 			return -1;
@@ -163,7 +163,19 @@ typedef struct ihex_info_t{
 	char* databuffer; // Holds all the data
 	size_t buffer_size;
 	uint32_t address; // Holds the address to which this data must be copied
+	uint32_t base_address;
+	uint32_t start_address; // Entry point; Start execution here
 }ihex_info_it;
+
+void init_ihex_info(ihex_info_it* info) {
+	info->size = 0;
+	info->rtype = 0;
+	info->databuffer = NULL;
+	info->buffer_size = 0;
+	info->address = 0;
+	info->base_address = 0;
+	info->start_address = 0;
+}
 
 IntelHexRecordType hex__get_record_type() {
 	char buf[2];
@@ -191,24 +203,75 @@ int hex__get_checksum() {
 	return atoi(buf, 2);
 }
 
+int hex_decode_data(ihex_info_it* info){
+	size_t byte_count = info->size;
+	char* databuf = info->databuffer;
+	if(info->buffer_size < byte_count) {
+		return -1;
+	}
+	hex__get_data(databuf, byte_count);
+	char checksum = hex__get_checksum();
+	return 0;
+}
+
+int hex_decode_extended_linear_address(ihex_info_it* info) {
+	size_t byte_count = info->size;
+	char buffer[2];
+	hex__get_data(buffer, 2);
+	info->base_address = ((size_t)buffer[0] << 24 ) | ((size_t)buffer[1] << 16); // Set the upper 16 bits of the 32 bit address
+	char checksum = hex__get_checksum();
+	return 0;
+}
+
+int hex_decode_start_linear_address(ihex_info_it* info) {
+	size_t byte_count = info->size;
+	char buffer[4];
+	hex__get_data(buffer, 4);
+	info->start_address = ((size_t)buffer[0] << 24 ) | ((size_t)buffer[1] << 16) | ((size_t)buffer[2] << 8) | ((size_t)buffer[3]);
+	char checksum = hex__get_checksum();
+	return 0;
+}
+
 int hex_decode(ihex_info_it* info) { // Get a single ihex record
 	while(1) {
 		char c = 0;
 		c = receive_byte_uart();
 		if(c == ':'){ //Is a valid ihex record
 			int byte_count = hex__get_byte_count();
-			uint32_t addr = 0;
-			addr = hex__get_address();
-			IntelHexRecordType rtype = hex__get_record_type();
-			char* databuf = info->databuffer;
-			if(info->buffer_size < byte_count) {
-				return -1;
-			}
-			hex__get_data(databuf, byte_count);
-			char checksum = hex__get_checksum();
-			info->address = addr;
 			info->size = byte_count;
-			return 0;
+			uint32_t addr = hex__get_address();
+			info->address = addr;
+			IntelHexRecordType rtype = hex__get_record_type();
+			info->rtype = rtype;
+			switch(rtype) {
+				case IHexRTypeData:
+					return hex_decode_data(info);
+				case IHexRTypeEOF:
+					//Verify that that is the case by looking at the checksum
+					{
+						int checksum = hex__get_checksum();
+						if(checksum == 0xff)
+							return 0;
+						else
+							kill("Oh no! EOF is invalid");
+					}
+				case IHexRTypeESA:
+				case IHexRTypeSSA:
+					kill("Unimplemented!");
+				case IHexRTypeELA:
+					return hex_decode_extended_linear_address(info);
+				case IHexRTypeSLA:
+					return hex_decode_start_linear_address(info);
+
+
+			}
+			//char* databuf = info->databuffer;
+			//if(info->buffer_size < byte_count) {
+			//	return -1;
+			//}
+			//hex__get_data(databuf, byte_count);
+			//char checksum = hex__get_checksum();
+			//return 0;
 		}
 	}
 }
@@ -322,33 +385,40 @@ void boot() {
 	}
 }
 
-#define IHEX_BUFSIZE 100
-
+#define IHEX_BUFSIZE BYTES_PER_PAGE
+char temp_buffer[IHEX_BUFSIZE]; //Buffer to store info before flushing to flash
 int main(void) {
 	system_init(); // Initialize clocks, flash etc
 	init_uart();
-	char ihex_buffer[IHEX_BUFSIZE];
 	ihex_info_it ihex_info;
-	ihex_info.databuffer = ihex_buffer;
-	ihex_info.buffer_size = IHEX_BUFSIZE;
-	int err = hex_decode(&ihex_info);
-	if(err != 0) {
-		kill("Error!!!");
-		while(1);
-	}
-	print_uart("Received hex record!\r\n");
-	print_uart("Address: ");
-	iprint_uart(ihex_info.address);
-	print_uart("\r\nByte Count: ");
-	iprint_uart(ihex_info.size);
-	print_uart("\r\nRecord Type: ");
-	iprint_uart(ihex_info.rtype);
-	print_uart("\r\nData:\r\n");
-	for(int i = 0; (i < ihex_info.size) && ( i < ihex_info.buffer_size ); i++) {
-		iprint_uart(i);
-		print_uart(": ");
-		iprint_uart(ihex_info.databuffer[i]);
-		print_uart("\r\n");
+	init_ihex_info(&ihex_info);
+	while(1){
+		char ihex_buffer[IHEX_BUFSIZE];
+		ihex_info.databuffer = ihex_buffer;
+		ihex_info.buffer_size = IHEX_BUFSIZE;
+		int err = hex_decode(&ihex_info);
+		if(err != 0) {
+			kill("Error!!!");
+			while(1);
+		}
+		print_uart("Received hex record!");
+		print_uart("\r\nAddress: ");
+		iprint_uart(ihex_info.address);
+		print_uart("\r\nBase Address: ");
+		iprint_uart(ihex_info.base_address);
+		print_uart("\r\nEffective Address: ");
+		iprint_uart(ihex_info.base_address + ihex_info.address);
+		print_uart("\r\nByte Count: ");
+		iprint_uart(ihex_info.size);
+		print_uart("\r\nRecord Type: ");
+		iprint_uart(ihex_info.rtype);
+		print_uart("\r\nData:\r\n");
+		for(int i = 0; (i < ihex_info.size) && ( i < ihex_info.buffer_size ); i++) {
+			iprint_uart(i);
+			print_uart(": ");
+			iprint_uart(ihex_info.databuffer[i]);
+			print_uart("\r\n");
+		}
 	}
 
 	//if(1) {

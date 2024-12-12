@@ -184,6 +184,6 @@ void debug_log(char* msg) {
 void kill(char* msg) {
 #if LOG==1
 	print_uart(msg);
-	fucked();
 #endif
+	fucked();
 }

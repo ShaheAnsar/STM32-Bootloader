@@ -1,8 +1,14 @@
 import serial
 ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=1)
 print(f"Using port: {ser.name}")
-msg = b":10010000214601360121470136007EFE09D2190140\n"
+ihex_data = []
+with open("bootloader.ihex", "r") as f:
+    for line in f:
+        ihex_data.append(line)
+
+print(f"Got hex data: {ihex_data}")
 while True:
-    ser.write(msg)
-    r = ser.read(1000)
-    print(r.decode('utf-8'))
+    for d in ihex_data:
+        ser.write(d.encode('utf-8'))
+        r = ser.read(1000)
+        print(r.decode('utf-8'))
