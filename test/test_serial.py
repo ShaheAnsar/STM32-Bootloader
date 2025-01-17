@@ -2,7 +2,7 @@ import serial
 ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=0.1)
 print(f"Using port: {ser.name}")
 ihex_data = []
-with open("bootloader.ihex", "r") as f:
+with open("blink.ihex", "r") as f:
     for line in f:
         ihex_data.append(line)
 

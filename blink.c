@@ -6,25 +6,6 @@
 
 
 
-void itoa(int a, char* buf, int n) {
-	if(a == 0) {
-		if(n >= 2){
-			buf[0] = '0';
-			buf[1] = 0; 
-		}
-		return;
-	}
-	int i = 0;
-	for(; i < n - 1; i++) {
-		if(a == 0)
-			break;
-		buf[n - 1 - i] = '0' + (a % 10);
-		a = a/10;
-	}
-	buf[i] = 0;
-}
-
-
 void fucked() {
   RCC_APB2ENR |= 1 << 4;
   // Set PC13 as an output
@@ -76,9 +57,9 @@ void on_board_blink(){
 	GPIOC_CRH |= (0b10 << 20);
 	while(1) {
 		GPIOC_BSRR |= (1 << 13);
-		delay_ms(500);
+		delay_ms(1000);
 		GPIOC_BSRR |= (1 << 29);
-		delay_ms(500);
+		delay_ms(100);
 	}
 }
 
@@ -107,63 +88,6 @@ void system_init() {
   systick_init();
 }
 
-void init_uart() {
-  //Setup the GPIO to the appropriate AFIO
-  // Enable AFIO clocks
-  RCC_APB2ENR |= 1;
-  // Clock PortA
-  RCC_APB2ENR |= 1 << 2;
-  // Reset the GPIO states to 0 for PA9 and PA10
-  GPIOA_CRH &= ~(0xff << 4);
-  //Set PA9 as an AFIO Output
-  GPIOA_CRH |= (0b11 << 4) | (0b10 << 6);
-  //Set PA10 as an input
-  GPIOA_CRH |= (0b01 << 10);
-
-  // Enable the uart clock
-  RCC_APB2ENR |= 1 << 14;
-  // Set the baud rate. The default is 9600
-  USART1_BRR = BAUDRATE_FRACTION(9600) | (BAUDRATE_MANTISSA(9600) << 4);
-
-  // Enable the UART
-  USART1_CR1 = 1 << 13;
-
-  // Reset the control resistors to a known state
-  USART1_CR2 = 0;
-  USART1_CR3 = 0; 
-  // Enable the transmitter and receiver
-  USART1_CR1 |= 0b11 << 2;
-}
-
-void send_uart(char a) {
-  // Wait till data is flushed from the output buffer
-  while(!( USART1_SR & (1 << 7 )));
-  USART1_DR = a;
-}
-
-
-char receive_byte_uart() {
-  // Wait till data is in the input buffer
-  while(!(USART1_SR & (1 << 5)));
-  return USART1_DR;
-}
-
-void print_uart(char* msg) {
-  for(uint32_t i = 0; msg[i] != 0; i++) {
-    send_uart(msg[i]);
-  }
-}
-
-void read_uart(char* buf, unsigned int len) {
-  for(uint32_t i = 0; i < len - 1; i++) {
-    buf[i] = receive_byte_uart();
-    if(buf[i] == '\r'){
-      buf[i + 1] = 0;
-      return;
-    }
-  }
-  buf[len - 1] = 0;
-}
 
 
 int main(void) {

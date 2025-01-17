@@ -79,4 +79,6 @@
 #define SPI1_CRCPR (*(volatile uint16_t*)(SPI1 + 0x10))
 #define SPI1_RXCRCR (*(volatile uint16_t*)(SPI1 + 0x14))
 #define SPI1_TXCRCR (*(volatile uint16_t*)(SPI1 + 0x18))
+
+extern void __set_msp(void* sp);
 #endif

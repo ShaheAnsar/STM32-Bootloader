@@ -44,6 +44,10 @@ LoopFillZerobss:
 	bl main
 	bx lr
 
+.global __set_msp
+__set_msp:
+	mov r13, r1
+	bx lr
 .global Default_Handler
 Default_Handler:
 	bl fucked

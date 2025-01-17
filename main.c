@@ -8,6 +8,8 @@
 #include "stm32f103.h"
 #include "utils.h"
 
+#define IHEX_BUFSIZE (BYTES_PER_PAGE + 100) //1024 bytes per page for this MCU, and 100 for jic
+
 
 void unlock_fpec() {
 	FLASH_KEYR = FPEC_KEY1;
@@ -50,7 +52,7 @@ int wait_for_magic(int timeout_ms) {
 void write_program() {
 }
 
-void erase_region(char* ptr, int pages) {
+void erase_region(uint16_t* ptr, int pages) {
 	// Make sure ptr is page aligned (0x400 aligned)
 	for(int i = 0; i < pages; i++) {
 		while(FLASH_SR & 1); // Wait till busy flag is clear
@@ -276,37 +278,37 @@ int hex_decode(ihex_info_it* info) { // Get a single ihex record
 	}
 }
 
-void transfer_to_backup() {
-	// Erase the backup region
-	debug_log("\nErasing the backup regions...");
-	erase_region((char*)BACKUP_PTR, BACKUP_PAGES);
-	debug_log("\nTransferring data to the backup region");
-	uint16_t buf[TRANSFER_PAGES * BYTES_PER_PAGE / 2];
-	for(int i = 0;;){
-		int j = 0;
-		// Copy data over to the buffer
-		for(; ( j < TRANSFER_PAGES * BYTES_PER_PAGE / 2) &&
-				(i + j < ( BOOTLOADER_STORAGE[APPLICATION_DATA_LENGTH_INDEX]/2 + ( BOOTLOADER_STORAGE[APPLICATION_DATA_LENGTH_INDEX] % 2 ))); j++){
-			buf[j] = APPLICATION_PTR[i + j];
-		}
-		// Flush all data in the buffer
-		write_flash(BACKUP_PTR + i, buf, j);
-		debug_log("\nWrote halfwords: ");
-		char num[10];
-		itoa(j, num, 10);
-		debug_log(num);
-		// Re-index to account for all the written data
-		i += j;
-		itoa(i, num, 10);
-		debug_log("\nTotal halfwords written: ");
-		debug_log(num);
-	}
-	// Write the backup metadata
-	uint16_t backup_length = BOOTLOADER_STORAGE[APPLICATION_DATA_LENGTH_INDEX];
-	uint16_t backup_valid = 1;
-	write_flash(BOOTLOADER_STORAGE + BACKUP_DATA_LENGTH_INDEX, &backup_length, 1);
-	write_flash(BOOTLOADER_STORAGE + BACKUP_VALID_INDEX, &backup_valid, 1);
-}
+//void transfer_to_backup() {
+//	// Erase the backup region
+//	debug_log("\nErasing the backup regions...");
+//	erase_region((char*)BACKUP_PTR, BACKUP_PAGES);
+//	debug_log("\nTransferring data to the backup region");
+//	uint16_t buf[TRANSFER_PAGES * BYTES_PER_PAGE / 2];
+//	for(int i = 0;;){
+//		int j = 0;
+//		// Copy data over to the buffer
+//		for(; ( j < TRANSFER_PAGES * BYTES_PER_PAGE / 2) &&
+//				(i + j < ( BOOTLOADER_STORAGE[APPLICATION_DATA_LENGTH_INDEX]/2 + ( BOOTLOADER_STORAGE[APPLICATION_DATA_LENGTH_INDEX] % 2 ))); j++){
+//			buf[j] = APPLICATION_PTR[i + j];
+//		}
+//		// Flush all data in the buffer
+//		write_flash(BACKUP_PTR + i, buf, j);
+//		debug_log("\nWrote halfwords: ");
+//		char num[10];
+//		itoa(j, num, 10);
+//		debug_log(num);
+//		// Re-index to account for all the written data
+//		i += j;
+//		itoa(i, num, 10);
+//		debug_log("\nTotal halfwords written: ");
+//		debug_log(num);
+//	}
+//	// Write the backup metadata
+//	uint16_t backup_length = BOOTLOADER_STORAGE[APPLICATION_DATA_LENGTH_INDEX];
+//	uint16_t backup_valid = 1;
+//	write_flash(BOOTLOADER_STORAGE + BACKUP_DATA_LENGTH_INDEX, &backup_length, 1);
+//	write_flash(BOOTLOADER_STORAGE + BACKUP_VALID_INDEX, &backup_valid, 1);
+//}
 
 uint16_t decode_metadata() {
 	// Wait for the metadata header
@@ -321,50 +323,51 @@ uint16_t decode_metadata() {
 	return size;
 }
 
-void update_firmware() {
-	// If a valid firmware already exists, transfer it to backup
-	if(!BOOTLOADER_STORAGE[APPLICATION_VALID_INDEX]) {
-		debug_log("\nValid firmware found! Transferring to backup region...");
-		transfer_to_backup();
-	}
-	// Invalidate the current application
-	uint16_t temp = 0;
-	write_flash(BOOTLOADER_STORAGE + APPLICATION_VALID_INDEX, &temp, 1);
-	// Erase the application region
-	debug_log("\nErasing application region....");
-	erase_region((char*)APPLICATION_PTR, APPLICATION_PAGES);
-	debug_log("\nWaiting for magic code...");
-	debug_log("\nGot the magic code, waiting for metadata...");
-	uint16_t firm_size = decode_metadata();
-	char num[10];
-	itoa(firm_size, num, 10);
-	debug_log("\nSize of firmware: ");
-	debug_log(num);
-	// Read and upload in chunks
-	uint16_t buf[BYTES_PER_PAGE/2];
-	char* cbuf = (char*)buf;
-	int received_bytes = 0;
-	debug_log("\nReceiving data and flushing in pages....");
-	while(1){
-		if(( firm_size - received_bytes ) > BYTES_PER_PAGE) {
-			debug_log("\nFlashing one page");
-			read_uart(cbuf, BYTES_PER_PAGE);
-			write_flash(APPLICATION_PTR, buf, BYTES_PER_PAGE/2);
-		} else {
-			debug_log("\nFlashing less than one page");
-			read_uart(cbuf, firm_size - received_bytes);
-			write_flash(APPLICATION_PTR, buf, ( (firm_size - received_bytes)/2 ) + ((firm_size - received_bytes) % 2));
-		}
-	}
-	debug_log("\nFirmware download completed!");
-	temp = 1;
-	write_flash(BOOTLOADER_STORAGE + APPLICATION_VALID_INDEX, &temp, 1);
-	write_flash(BOOTLOADER_STORAGE + APPLICATION_DATA_LENGTH_INDEX, &firm_size, 1);
-}
+//void update_firmware() {
+//	// If a valid firmware already exists, transfer it to backup
+//	if(!BOOTLOADER_STORAGE[APPLICATION_VALID_INDEX]) {
+//		debug_log("\nValid firmware found! Transferring to backup region...");
+//		transfer_to_backup();
+//	}
+//	// Invalidate the current application
+//	uint16_t temp = 0;
+//	write_flash(BOOTLOADER_STORAGE + APPLICATION_VALID_INDEX, &temp, 1);
+//	// Erase the application region
+//	debug_log("\nErasing application region....");
+//	erase_region((char*)APPLICATION_PTR, APPLICATION_PAGES);
+//	debug_log("\nWaiting for magic code...");
+//	debug_log("\nGot the magic code, waiting for metadata...");
+//	uint16_t firm_size = decode_metadata();
+//	char num[10];
+//	itoa(firm_size, num, 10);
+//	debug_log("\nSize of firmware: ");
+//	debug_log(num);
+//	// Read and upload in chunks
+//	uint16_t buf[BYTES_PER_PAGE/2];
+//	char* cbuf = (char*)buf;
+//	int received_bytes = 0;
+//	debug_log("\nReceiving data and flushing in pages....");
+//	while(1){
+//		if(( firm_size - received_bytes ) > BYTES_PER_PAGE) {
+//			debug_log("\nFlashing one page");
+//			read_uart(cbuf, BYTES_PER_PAGE);
+//			write_flash(APPLICATION_PTR, buf, BYTES_PER_PAGE/2);
+//		} else {
+//			debug_log("\nFlashing less than one page");
+//			read_uart(cbuf, firm_size - received_bytes);
+//			write_flash(APPLICATION_PTR, buf, ( (firm_size - received_bytes)/2 ) + ((firm_size - received_bytes) % 2));
+//		}
+//	}
+//	debug_log("\nFirmware download completed!");
+//	temp = 1;
+//	write_flash(BOOTLOADER_STORAGE + APPLICATION_VALID_INDEX, &temp, 1);
+//	write_flash(BOOTLOADER_STORAGE + APPLICATION_DATA_LENGTH_INDEX, &firm_size, 1);
+//}
+
 void deinit_system() {
 	// Disable the systick
-	STK_CTRL = 0;
-	STK_LOAD = 0;
+	//STK_CTRL = 0;
+	//STK_LOAD = 0;
 	// Reset GPIO and UART
 	// Reset clocks
 }
@@ -375,7 +378,7 @@ void boot() {
 
 	}
 	// If the backup firwmare is valid, boot from it
-	else if(BOOTLOADER_STORAGE[APPLICATION_VALID_INDEX]) {
+	else if(BOOTLOADER_STORAGE[BACKUP_VALID_INDEX]) {
 
 	}
 	// If neither are valid
@@ -386,7 +389,6 @@ void boot() {
 }
 
 
-#define IHEX_BUFSIZE BYTES_PER_PAGE //1024 bytes per page for this MCU
 typedef struct DataBuffer_t{
 	char buffer[IHEX_BUFSIZE];
 	size_t length; //Valid data stored so far
@@ -409,6 +411,10 @@ size_t DataBuffer_free_space(DataBuffer_t* buf) {
 	return IHEX_BUFSIZE - buf->length;
 }
 
+void DataBuffer_clear(DataBuffer_t* buf) {
+	DataBuffer_init(buf);
+}
+
 int main(void) {
 	system_init(); // Initialize clocks, flash etc
 	init_uart();
@@ -416,7 +422,39 @@ int main(void) {
 	init_ihex_info(&ihex_info);
 	DataBuffer_t buf;
 	DataBuffer_init(&buf);
+	size_t offset = 0; //Offset into flash
+	size_t start_addr = 0;
+	int flush_condition = 0;
+	int jump_condition = 0;
 	while(1){
+		// If we have enough data to flush, flush
+		if(flush_condition){
+			print_uart("\r\nFlushing to: ");
+			iprint_uart((uint32_t)(APPLICATION_PTR + offset/2));
+			print_uart("\r\nBase address: ");
+			iprint_uart((uint32_t)APPLICATION_PTR);
+			print_uart("\r\nOffset: ");
+			iprint_uart(offset);
+			erase_region(APPLICATION_PTR + offset/2, 1); // Erase 1 page, /2 because pointer is uint16_t
+			write_flash(APPLICATION_PTR + offset/2, (uint16_t*)buf.buffer, BYTES_PER_PAGE/2); // Function takes number of half words, we flush 1024 bytes here
+			offset += BYTES_PER_PAGE;
+			// Reset Buffer now that we have flushed all the data
+			DataBuffer_clear(&buf);
+			flush_condition = 0;
+		}
+		//If we have flushed all data, now we jump
+		if(jump_condition){
+			print_uart("\r\nJumping to: ");
+			SCB_VTOR = (size_t)APPLICATION_PTR & ~(0xff);
+			iprint_uart(*((uint32_t*)APPLICATION_PTR + 1));
+			print_uart("\r\nSetting Stack pointer to...");
+			iprint_uart(*(uint32_t*)APPLICATION_PTR);
+			__set_msp(*(void**)APPLICATION_PTR);
+			print_uart("\r\nFlushed, set VTOR and now jumping....\r\n");
+			deinit_system();
+			void (*app_func)(void) = (void*)(*((volatile uint32_t*)((uint32_t)APPLICATION_PTR + 0x04)));
+			app_func();
+		}
 		ihex_info.databuffer = DataBuffer_current_free_address(&buf);
 		ihex_info.buffer_size = DataBuffer_free_space(&buf);
 		int err = hex_decode(&ihex_info);
@@ -444,6 +482,12 @@ int main(void) {
 			print_uart(": ");
 			iprint_uart(ihex_info.databuffer[i]);
 			print_uart("\r\n");
+		}
+		if((buf.length > BYTES_PER_PAGE) || (ihex_info.rtype == IHexRTypeEOF)) {
+			flush_condition = 1;
+		}
+		if(ihex_info.rtype == IHexRTypeEOF){
+			jump_condition = 1;
 		}
 	}
 
